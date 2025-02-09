@@ -45,6 +45,14 @@ CREATE OR REPLACE FUNCTION f_format_duration(duration) AS (
 
 
 --
+-- Turns a time value into a duration in seconds
+--
+CREATE OR REPLACE FUNCTION f_make_duration(time_value) AS (
+  SELECT extract('hour' FROM time_value)*60*60 + extract('minute' FROM time_value)*60 + extract('second' FROM time_value)
+);
+
+
+--
 -- Unifies a Garmin activity
 --
 CREATE OR REPLACE FUNCTION f_unify_activity_type(activity_type) AS (
