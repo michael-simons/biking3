@@ -14,7 +14,8 @@ WITH
     WHERE Titel LIKE 'NRFTW%'
   ),
   activities AS (
-    SELECT "Started_on" : Datum,
+    SELECT "Day #"      : dense_rank() OVER (ORDER BY Datum::DATE),
+           "Day"        : Datum::DATE,
            "Run #"      : row_number() OVER (),
            "Break"      : age(Datum, coalesce(date_add(lag(Datum) OVER starts, INTERVAL (lag(Duration) OVER starts) Second), Datum))::VARCHAR,
            "Hour of day": hour(Datum),
@@ -28,12 +29,10 @@ WITH
            "Duration"   : extract('hour' FROM Zeit)*60*60 + extract('minute' FROM Zeit)*60 + extract('second' FROM Zeit),
            "Progress"   : 100/24,
     FROM src
-    WINDOW starts AS (ORDER BY Started_on)
+    WINDOW starts AS (ORDER BY Datum)
   ),
   sums AS (
-    SELECT "Day #" : dense_rank() OVER (ORDER BY Day),
-           "Day"   : Started_on::DATE,
-           * EXCLUDE(Started_on) REPLACE(
+    SELECT * REPLACE(
                round(sum(Distance), 2)   AS Distance,
                to_seconds(sum(Duration)) AS Duration,
                sum(Progress) OVER dates  AS Progress
@@ -41,12 +40,11 @@ WITH
            "p_weekdays" : count(DISTINCT Weekday) OVER (ORDER BY Day GROUPS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),
            "Weekdays"   : count(DISTINCT Weekday) OVER dates
     FROM activities
-    GROUP BY GROUPING SETS (( "Run #", Day, "Hour of day", Progress, Weekday, Break, Sport), ( Day), ())
+    GROUP BY GROUPING SETS (("Day #", "Run #", Day, "Hour of day", Progress, Weekday, Break, Sport), ("Day #", Day), ())
     WINDOW dates AS (ORDER BY Day)
   )
 SELECT * EXCLUDE(p_weekdays) REPLACE (
-           break::INTERVAL AS Break,
-           CASE WHEN Day IS NOT NULL THEN "Day #" END AS "Day #",
+           Break::INTERVAL AS Break,
            CASE WHEN "Hour of day" IS NULL AND p_weekdays <> 7 AND Weekdays = 7 THEN '✅' END AS Weekdays,
            CASE
              WHEN Day           IS NULL THEN lpad(printf('%.2f%%', Progress), 7, ' ')
