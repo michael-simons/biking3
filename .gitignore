@@ -2,7 +2,9 @@
 
 sport.db
 Gear
-Misc
+Misc/**
+!Misc/No\ Rest\ for\ the\ Wicked/
+!Misc/No\ Rest\ for\ the\ Wicked/evaluate.sql
 Strava Badges
 Veloviewer Stats
 generator/static/assets
