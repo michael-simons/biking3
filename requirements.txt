@@ -1,6 +1,6 @@
 blinker==1.6.2
 click==8.1.6
-duckdb==1.2.0
+duckdb==1.2.1
 Flask==2.3.2
 Frozen-Flask==0.18
 itsdangerous==2.1.2
