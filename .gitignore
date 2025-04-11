@@ -16,6 +16,7 @@ backup
 import
 Garmin
 Urkunden
+*.wal
 
 .venv
 .secrets
