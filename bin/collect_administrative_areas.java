@@ -202,7 +202,22 @@ public class collect_administrative_areas implements Callable<Integer> {
 				try (var stmt = connection.createStatement()) {
 					stmt.execute("INSTALL spatial");
 					stmt.execute("LOAD spatial");
+					stmt.execute("ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS administrative_areas_processed BOOLEAN DEFAULT false");
+					stmt.execute("CREATE SEQUENCE IF NOT EXISTS administrative_area_id");
+					stmt.execute("""
+						CREATE TABLE IF NOT EXISTS administrative_areas (
+							id BIGINT PRIMARY KEY DEFAULT(nextval('administrative_area_id')),
+							parent_id BIGINT NOT NULL,
+							country_code VARCHAR(2) NOT NULL,
+							level UTINYINT NOT NULL,
+							name VARCHAR(256) NOT NULL,
+							visited_count INTEGER NOT NULL,
+							visited_first_on DATE NOT NULL,
+							visited_last_on DATE NOT NULL,
+							CONSTRAINT unique_area UNIQUE(parent_id, name)
+						)""");
 				}
+				connection.commit();
 				return new Areas(allGpxFiles, emailAddress, maxFiles, connection);
 			}
 		}
