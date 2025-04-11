@@ -55,7 +55,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 	@CommandLine.Option(names = "--email-address", required = true)
 	private String emailAddress;
 
-	@CommandLine.Option(names = "--max-files", required = true, defaultValue = "10")
+	@CommandLine.Option(names = "--max-files", required = true, defaultValue = "100")
 	private int maxFiles;
 
 	@CommandLine.Parameters(arity = "1")
@@ -361,7 +361,8 @@ public class collect_administrative_areas implements Callable<Integer> {
 					countries.add(areas);
 				}
 				try {
-					Thread.sleep(ThreadLocalRandom.current().nextInt(10) * 100);
+					// nominatim ask for not more than 1 request per second, so between 1 and 5 seconds is probably good enough.
+					Thread.sleep(ThreadLocalRandom.current().nextInt(5) * 1000);
 				} catch (InterruptedException e) {
 					Thread.currentThread().interrupt();
 				}
