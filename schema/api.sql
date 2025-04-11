@@ -634,26 +634,26 @@ COMMENT ON VIEW v_explorer_squares IS 'The biggest square explored.';
 --
 CREATE OR REPLACE VIEW v_visited_areas AS
 WITH RECURSIVE
-  max_level AS (
-    SELECT country_code, max(level) as level
-    FROM administrative_areas
-    GROUP BY country_code
-  ),
   area AS (
-    SELECT id, country_code, level,
+    SELECT id,
+           country_code,
            [src.name] as path,
-           CAST(null AS date) AS visited_last_on,
+           visited_count,
+           visited_last_on,
+           false AS is_leaf
     FROM administrative_areas src
     WHERE parent_id = -1
     UNION ALL
     SELECT this.id,
            this.country_code,
-           this.level,
            list_append(area.path, name) as path,
+           this.visited_count,
            this.visited_last_on,
+           (SELECT count(*) FROM administrative_areas sub where sub.parent_id = this.id) = 0 AS is_leaf
     FROM administrative_areas this JOIN area on(parent_id = area.id)
   )
-SELECT path, visited_last_on
-FROM max_level NATURAL JOIN area
+SELECT path, visited_count, visited_last_on
+FROM area
+WHERE is_leaf
 ORDER BY path;
 COMMENT ON VIEW v_visited_areas IS 'Quick overview over the visited areas.';
