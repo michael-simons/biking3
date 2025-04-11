@@ -235,7 +235,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 					}
 					tmpFiles.add(tmp);
 
-					System.err.printf("Processing %s%n", tmp.toString());
+					System.err.printf("Processing %d via %s%n", file.id(), tmp.toString());
 					stmt.setString(1, tmp.toString());
 					var polyline = new Polyline();
 					try (var points = stmt.executeQuery()) {
