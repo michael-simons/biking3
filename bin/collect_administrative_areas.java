@@ -336,7 +336,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 				.map(ids -> ids.stream().map(id -> "W" + id).collect(Collectors.joining(",")))
 				.map(ids -> HttpRequest.newBuilder(URI.create("https://nominatim.openstreetmap.org/lookup?format=geocodejson&addressdetails=1&osm_ids=%s&email=%s".formatted(ids, emailAddress)))
 					.header("User-Agent", USER_AGENT)
-					.header("Accept-Language", "")
+					.header("Accept-Language", "en")
 					.GET().build()).toList();
 
 			var countries = new HashSet<List<Area>>();
