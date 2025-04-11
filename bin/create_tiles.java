@@ -1,7 +1,7 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
-//JAVA 23
+//JAVA 24
 //DEPS info.picocli:picocli:4.7.6
-//DEPS org.duckdb:duckdb_jdbc:1.1.3
+//DEPS org.duckdb:duckdb_jdbc:1.2.1
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -25,7 +25,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
-import picocli.AutoComplete;
 import picocli.CommandLine;
 import picocli.CommandLine.ExitCode;
 
@@ -34,10 +33,7 @@ import picocli.CommandLine.ExitCode;
 	name = "create-tiles",
 	mixinStandardHelpOptions = true,
 	description = "Processes new Garmin activities, (re)visits tiles and updates the clusters.",
-	subcommands = {
-		AutoComplete.GenerateCompletion.class,
-		CommandLine.HelpCommand.class
-	}
+	subcommands = {CommandLine.HelpCommand.class}
 )
 public class create_tiles implements Callable<Integer> {
 
@@ -50,7 +46,7 @@ public class create_tiles implements Callable<Integer> {
 	@CommandLine.Parameters(arity = "1")
 	private Path database;
 
-	public static void main(String[] args) {
+	public static void main(String... args) {
 		int exitCode = new CommandLine(new create_tiles()).execute(args);
 		System.exit(exitCode);
 	}
@@ -59,9 +55,9 @@ public class create_tiles implements Callable<Integer> {
 	public Integer call() throws Exception {
 
 		var userDirectory = Path.of(System.getProperty("user.dir"));
-		tracksDir = userDirectory.resolve(tracksDir);
-		if (!Files.isDirectory(tracksDir)) {
-			System.err.println("Directory containing tracks not found: " + tracksDir);
+		var tracksDirResolved = userDirectory.resolve(this.tracksDir);
+		if (!Files.isDirectory(tracksDirResolved)) {
+			System.err.println("Directory containing tracks not found: " + tracksDirResolved);
 			return ExitCode.USAGE;
 		}
 
@@ -71,7 +67,7 @@ public class create_tiles implements Callable<Integer> {
 			return ExitCode.USAGE;
 		}
 
-		try (var tiles = Tiles.of(tracksDir, database, zoom)) {
+		try (var tiles = Tiles.of(tracksDirResolved, database, zoom)) {
 			tiles.update();
 		}
 

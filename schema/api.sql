@@ -627,3 +627,33 @@ SELECT zoom, CAST({
 FROM features
 GROUP BY zoom;
 COMMENT ON VIEW v_explorer_squares IS 'The biggest square explored.';
+
+
+--
+-- v_visited_areas
+--
+CREATE OR REPLACE VIEW v_visited_areas AS
+WITH RECURSIVE
+  max_level AS (
+    SELECT country_code, max(level) as level
+    FROM administrative_areas
+    GROUP BY country_code
+  ),
+  area AS (
+    SELECT id, country_code, level,
+           [src.name] as path,
+           CAST(null AS date) AS visited_last_on,
+    FROM administrative_areas src
+    WHERE parent_id = -1
+    UNION ALL
+    SELECT this.id,
+           this.country_code,
+           this.level,
+           list_append(area.path, name) as path,
+           this.visited_last_on,
+    FROM administrative_areas this JOIN area on(parent_id = area.id)
+  )
+SELECT path, visited_last_on
+FROM max_level NATURAL JOIN area
+ORDER BY path;
+COMMENT ON VIEW v_visited_areas IS 'Quick overview over the visited areas.';
