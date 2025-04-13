@@ -16,6 +16,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -229,20 +230,21 @@ public class collect_administrative_areas implements Callable<Integer> {
 					""");
 
 			this.storeAreasStmt = connection.prepareStatement("""
+					WITH lvl AS (SELECT ? AS value)
 					INSERT INTO administrative_areas BY NAME
 					SELECT ? AS parent_id,
 					       ? AS country_code,
-					       ? AS level,
+					       lvl.value AS level,
 					       ? AS name,
-					       1 AS visited_count,
-					       started_on::date AS visited_first_on,
-					       started_on::date AS visited_last_on
-					FROM garmin_activities WHERE garmin_id = ?
+					       if(lvl.value = 0, null, 1) AS visited_count,
+					       if(lvl.value = 0, null, started_on::date) AS visited_first_on,
+					       if(lvl.value = 0, null, started_on::date) AS visited_last_on
+					FROM garmin_activities, lvl WHERE garmin_id = ?
 					ON CONFLICT (parent_id, name) DO UPDATE SET
 					    id = id,
-						   visited_count = visited_count + 1,
-						   visited_first_on = least(visited_first_on, excluded.visited_first_on),
-						   visited_last_on = greatest(visited_last_on, excluded.visited_last_on),
+					    visited_count = visited_count + 1,
+					    visited_first_on = least(visited_first_on, excluded.visited_first_on),
+					    visited_last_on = greatest(visited_last_on, excluded.visited_last_on),
 					RETURNING id
 					""");
 
@@ -276,12 +278,42 @@ public class collect_administrative_areas implements Callable<Integer> {
 					System.err.printf("Processing %d via %s%n", file.id(), tmp);
 					storeAreas(file, selectAreasByCountry(selectCountries(tmp)));
 				}
+
 			}
 			finally {
 				for (Path tmpFile : tmpFiles) {
 					Files.deleteIfExists(tmpFile);
 				}
 			}
+
+			// As countries may get updated several times per activity,
+			// we must fix them after the fact
+			computeCountryStats();
+		}
+
+		private void computeCountryStats() throws SQLException {
+			var query = """
+					WITH fix AS (
+					  SELECT country_code,
+					         sum(visited_count) AS visited_count,
+					         min(visited_first_on) AS visited_first_on,
+					         max(visited_last_on) AS visited_last_on
+					  FROM administrative_areas p
+					  WHERE NOT EXISTS (SELECT '' FROM administrative_areas c WHERE parent_id = p.id)
+					  GROUP BY ALL
+					)
+					UPDATE administrative_areas t
+					SET
+					  visited_count = fix.visited_count,
+					  visited_first_on = fix.visited_first_on,
+					  visited_last_on = fix.visited_last_on
+					FROM fix
+					WHERE level = 0 AND t.country_code = fix.country_code
+					""";
+			try (var stmt = connection.createStatement()) {
+				stmt.execute(query);
+			}
+			connection.commit();
 		}
 
 		private TrackWithCountries selectCountries(Path trackFile) throws Exception {
@@ -387,9 +419,9 @@ public class collect_administrative_areas implements Callable<Integer> {
 				var parentId = -1L;
 				var countryCode = hierarchy.getFirst().code();
 				for (var area : hierarchy) {
-					this.storeAreasStmt.setLong(1, parentId);
-					this.storeAreasStmt.setString(2, countryCode);
-					this.storeAreasStmt.setInt(3, area.level());
+					this.storeAreasStmt.setInt(1, area.level());
+					this.storeAreasStmt.setLong(2, parentId);
+					this.storeAreasStmt.setString(3, countryCode);
 					this.storeAreasStmt.setString(4, area.name());
 					this.storeAreasStmt.setLong(5, file.id());
 					this.storeAreasStmt.execute();

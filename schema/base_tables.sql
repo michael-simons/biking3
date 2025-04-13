@@ -306,8 +306,8 @@ CREATE TABLE IF NOT EXISTS administrative_areas (
     country_code VARCHAR(3) NOT NULL,
     level UTINYINT NOT NULL,
     name VARCHAR(256) NOT NULL,
-    visited_count INTEGER NOT NULL,
-    visited_first_on DATE NOT NULL,
-    visited_last_on DATE NOT NULL,
+    visited_count INTEGER NULL,
+    visited_first_on DATE NULL,
+    visited_last_on DATE NULL,
     CONSTRAINT unique_area UNIQUE(parent_id, name)
 );
