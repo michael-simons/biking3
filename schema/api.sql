@@ -627,3 +627,47 @@ SELECT zoom, CAST({
 FROM features
 GROUP BY zoom;
 COMMENT ON VIEW v_explorer_squares IS 'The biggest square explored.';
+
+
+--
+-- v_visited_areas
+-- Modelled after this wonderful post
+-- https://schinckel.net/2017/07/01/tree-data-as-a-nested-list-redux/
+-- Found via https://stackoverflow.com/a/68861529
+--
+CREATE OR REPLACE VIEW v_visited_areas AS
+WITH RECURSIVE
+  maxlvl AS (
+    SELECT max(level) maxlvl FROM administrative_areas
+  ),
+  c_tree AS (
+    SELECT administrative_areas.*, []::JSON children
+    FROM administrative_areas, maxlvl
+    WHERE level = maxlvl.maxlvl
+
+    UNION
+
+    (
+      SELECT branch_parent.*, list(branch_child)
+      FROM (
+        SELECT branch_parent,
+               struct_pack(*columns(branch_child.* EXCLUDE (country_code, level, id, parent_id, visited_first_on)))::JSON AS branch_child
+        FROM administrative_areas branch_parent
+        JOIN c_tree branch_child ON branch_child.parent_id = branch_parent.id
+      ) branch
+      GROUP BY branch.branch_parent
+
+      UNION
+
+      SELECT c.*, []::JSON
+      FROM administrative_areas c
+      WHERE NOT EXISTS (SELECT 1 FROM administrative_areas hypothetical_child WHERE hypothetical_child.parent_id = c.id)
+   )
+)
+SELECT struct_pack(*columns(
+         c_tree.* EXCLUDE (country_code, level, id, parent_id, visited_first_on))
+       )::JSON AS areas
+FROM c_tree
+WHERE level=0
+ORDER BY country_code;
+COMMENT ON VIEW v_visited_areas IS 'Quick overview over the visited areas.';

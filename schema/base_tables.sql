@@ -117,6 +117,11 @@ CREATE TABLE IF NOT EXISTS garmin_activities (
 ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS gpx_available BOOLEAN DEFAULT false;
 
 --
+-- Add a flag whether administrative areas for this activity have been computed
+--
+ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS administrative_areas_processed BOOLEAN DEFAULT false;
+
+--
 -- Add a flag whether the GPX data was processed into tiles or not
 --
 CREATE TABLE IF NOT EXISTS processed_zoom_levels (
@@ -125,7 +130,6 @@ CREATE TABLE IF NOT EXISTS processed_zoom_levels (
     PRIMARY KEY (garmin_id, zoom),
     CONSTRAINT garmin_id_fk FOREIGN KEY(garmin_id) REFERENCES garmin_activities(garmin_id)
 );
-
 
 --
 -- Add the device id
@@ -289,4 +293,21 @@ CREATE TABLE IF NOT EXISTS tiles (
     cluster_index    INT,
     square           UTINYINT,
     PRIMARY KEY (x, y, zoom)
+);
+
+
+--
+-- Explored administrative areas
+--
+CREATE SEQUENCE IF NOT EXISTS administrative_area_id;
+CREATE TABLE IF NOT EXISTS administrative_areas (
+    id BIGINT PRIMARY KEY DEFAULT(nextval('administrative_area_id')),
+    parent_id BIGINT NOT NULL,
+    country_code VARCHAR(3) NOT NULL,
+    level UTINYINT NOT NULL,
+    name VARCHAR(256) NOT NULL,
+    visited_count INTEGER NOT NULL,
+    visited_first_on DATE NOT NULL,
+    visited_last_on DATE NOT NULL,
+    CONSTRAINT unique_area UNIQUE(parent_id, name)
 );

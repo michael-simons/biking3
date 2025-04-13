@@ -2,11 +2,9 @@
 //JAVA 24
 //DEPS info.picocli:picocli:4.7.6
 //DEPS org.duckdb:duckdb_jdbc:1.2.1
-//DEPS com.fasterxml.jackson.core:jackson-databind:2.18.3
 //RUNTIME_OPTIONS --enable-native-access=ALL-UNNAMED
 
 import java.io.FileInputStream;
-import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,131 +14,60 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
-import java.util.function.Predicate;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Gatherers;
-import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.fasterxml.jackson.databind.ser.std.ToStringSerializer;
 import picocli.CommandLine;
 
-@SuppressWarnings( {"SqlDialectInspection", "SqlNoDataSourceInspection"})
-@CommandLine.Command(
-	name = "collect-administrative-areas",
-	mixinStandardHelpOptions = true,
-	description = "Tries to map-match Garmin activities with available GPX and does reverse address lookups on the ways to figure out all administrative areas covered.",
-	subcommands = {CommandLine.HelpCommand.class}
-)
+/**
+ * Base borders are sourced from
+ * <a href="https://www.naturalearthdata.com/downloads/10m-cultural-vectors/">Natural
+ * Earth Data</a>, global administrative layers from <a href="https://gadm.org">GADM</a>.
+ *
+ * @author Michael J. Simons
+ */
+@SuppressWarnings({ "SqlDialectInspection", "SqlNoDataSourceInspection" })
+@CommandLine.Command(name = "collect-administrative-areas", mixinStandardHelpOptions = true,
+		description = "Computes countries per track and than tries to collect administrative areas as deep as possible.",
+		subcommands = { CommandLine.HelpCommand.class })
 public class collect_administrative_areas implements Callable<Integer> {
 
 	private static final String USER_AGENT = "biking3 (collect-administrative-areas)";
 
+	private static final String GADM_VERSION = "4.1";
+
+	private static final String GADM_PREFIX = "gadm" + GADM_VERSION.replace(".", "");
+
 	@CommandLine.Option(names = "--tracks-dir", required = true, defaultValue = "Garmin/Tracks")
 	private Path tracksDir;
 
-	@CommandLine.Option(names = "--email-address", required = true)
-	private String emailAddress;
+	@CommandLine.Option(names = "--border-dir", required = true)
+	private Path borderDir;
+
+	/**
+	 * Use a name from the <a href=
+	 * "https://www.naturalearthdata.com/downloads/10m-cultural-vectors/">cultural-vectors</a>.
+	 */
+	@CommandLine.Option(names = "--countries-to-use", required = true,
+			defaultValue = "ne_10m_admin_0_countries_deu.zip")
+	private String countriesToUse;
 
 	@CommandLine.Option(names = "--max-files", required = true, defaultValue = "100")
 	private int maxFiles;
 
 	@CommandLine.Parameters(arity = "1")
 	private Path database;
-
-	/**
-	 * A polyline that implements the algorithm defined in <a href="https://developers.google.com/maps/documentation/utilities/polylinealgorithm">Encoded Polyline Algorithm Format</a>.
-	 * Google uses a scale of 5, so if you want to test using <a href="https://developers.google.com/maps/documentation/routes/polylinedecoder?hl=en">this</a> tool, set scale to 5.
-	 * Valhalla of course uses 6 (see <a href="https://valhalla.github.io/valhalla/decoding/">decoding</a>).
-	 */
-	@JsonSerialize(using = ToStringSerializer.class)
-	static class Polyline {
-
-		record Point(int x, int y) {
-
-			private Point offset(Point other) {
-				return new Point(x - other.x(), y - other.y());
-			}
-
-			private String encode() {
-				return encode0(x) + encode0(y);
-			}
-
-			private String encode0(int v) {
-				var num = v << 1;
-				if (v < 0) {
-					num = ~num;
-				}
-
-				var result = new StringBuilder();
-				while (num >= 0x20) {
-					int nextValue = (0x20 | (num & 0x1f)) + 63;
-					result.append((char) (nextValue));
-					num >>= 5;
-				}
-
-				num += 63;
-				result.append((char) (num));
-				return result.toString();
-			}
-		}
-
-		private final List<Point> points = new ArrayList<>();
-
-		private final int scale;
-
-		Polyline() {
-			this(6);
-		}
-
-		Polyline(int scale) {
-			this.scale = (int) Math.pow(10, scale);
-		}
-
-		void add(double x, double y) {
-			this.points.add(new Point((int) Math.floor(x * scale), (int) Math.floor(y * scale)));
-		}
-
-		@Override
-		public String toString() {
-			if (points.isEmpty()) {
-				return "";
-			}
-			var initial = points.getFirst().encode();
-			if (points.size() == 1) {
-				return initial;
-			}
-			var remainder = points.stream().gather(Gatherers.windowSliding(2)).map(pair -> pair.getLast().offset(pair.getFirst()).encode()).collect(Collectors.joining());
-			return initial + remainder;
-		}
-	}
-
-	/**
-	 * Represents an administrative area.
-	 * Country specific levels are <a href="https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative#Country_specific_values_%E2%80%8B%E2%80%8Bof_the_key_admin_level=*">here</a>.
-	 *
-	 * @param level the level of the area
-	 * @param code  the ISO3166-1 code, if available
-	 * @param name  the local name of the area
-	 */
-	record Area(int level, String code, String name) {
-	}
-
-	private static final TypeReference<Map<String, Object>> MAP_OF_OBJECTS = new TypeReference<>() {
-	};
 
 	public static void main(String... args) {
 		int exitCode = new CommandLine(new collect_administrative_areas()).execute(args);
@@ -157,43 +84,65 @@ public class collect_administrative_areas implements Callable<Integer> {
 			return CommandLine.ExitCode.USAGE;
 		}
 
-		database = userDirectory.resolve(database);
-		if (!Files.isRegularFile(database)) {
-			System.err.println("Database not found: " + database);
+		var databaseResolved = userDirectory.resolve(this.database);
+		if (!Files.isRegularFile(databaseResolved)) {
+			System.err.println("Database not found: " + this.database);
 			return CommandLine.ExitCode.USAGE;
 		}
 
-		try (var areas = Areas.of(tracksDirResolved, emailAddress, maxFiles, database)) {
+		var borderDirResolved = userDirectory.resolve(this.borderDir);
+		if (Files.isRegularFile(borderDirResolved)) {
+			System.err.println(this.borderDir + " already exists and is a file");
+			return CommandLine.ExitCode.USAGE;
+		}
+		if (!Files.exists(borderDirResolved)) {
+			Files.createDirectories(borderDirResolved);
+		}
+
+		try (var areas = Areas.of(tracksDirResolved, borderDirResolved, this.countriesToUse, this.maxFiles,
+				databaseResolved)) {
 			areas.collect();
 		}
 
 		return CommandLine.ExitCode.OK;
 	}
 
-	@SuppressWarnings("unchecked")
-	static class Areas implements AutoCloseable {
+	/**
+	 * Represents an administrative area.
+	 *
+	 * @param level the level of the area
+	 * @param code the ISO 3166-1 alpha-3 code, if available
+	 * @param name the local name of the area
+	 */
+	record Area(int level, String code, String name) {
+	}
 
-		record IdAndPath(Long id, Path path) {
-		}
+	static final class Areas implements AutoCloseable {
 
 		private final Map<String, Path> allGpxFiles;
 
-		private final String emailAddress;
-
-		private final Connection connection;
+		private final Path gadmDir;
 
 		private final int maxFiles;
 
+		private final Connection connection;
+
+		private final PreparedStatement selectNewActivitiesStmt;
+
+		private final PreparedStatement selectCountriesStmt;
+
+		private final PreparedStatement selectAreaStmt;
+
+		private final PreparedStatement storeAreasStmt;
+
+		private final PreparedStatement updateStmt;
+
 		private final HttpClient httpClient = HttpClient.newHttpClient();
 
-		private final ObjectMapper om = new ObjectMapper();
-
-		private final Set<Number> knownIds = new HashSet<>();
-
-		static Areas of(Path tracksDir, String emailAddress, int maxFiles, Path database) throws SQLException, IOException {
+		static Areas of(Path tracksDir, Path borderDir, String countriesToUse, int maxFiles, Path database)
+				throws Exception {
 			try (var allFiles = Files.list(tracksDir)) {
-				var allGpxFiles = allFiles
-					.filter(p -> p.getFileName().toString().endsWith(".gpx.gz"))
+				var allGpxFiles = allFiles.filter(p -> p.getFileName().toString().endsWith(".gpx.gz"))
 					.collect(Collectors.toMap(p -> p.getFileName().toString(), Function.identity()));
 
 				var connection = DriverManager.getConnection("jdbc:duckdb:" + database.toAbsolutePath());
@@ -202,75 +151,84 @@ public class collect_administrative_areas implements Callable<Integer> {
 				try (var stmt = connection.createStatement()) {
 					stmt.execute("INSTALL spatial");
 					stmt.execute("LOAD spatial");
-					stmt.execute("ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS administrative_areas_processed BOOLEAN DEFAULT false");
-					stmt.execute("CREATE SEQUENCE IF NOT EXISTS administrative_area_id");
-					stmt.execute("""
-						CREATE TABLE IF NOT EXISTS administrative_areas (
-							id BIGINT PRIMARY KEY DEFAULT(nextval('administrative_area_id')),
-							parent_id BIGINT NOT NULL,
-							country_code VARCHAR(2) NOT NULL,
-							level UTINYINT NOT NULL,
-							name VARCHAR(256) NOT NULL,
-							visited_count INTEGER NOT NULL,
-							visited_first_on DATE NOT NULL,
-							visited_last_on DATE NOT NULL,
-							CONSTRAINT unique_area UNIQUE(parent_id, name)
-						)""");
+				}
+
+				var countries = borderDir.resolve("countries");
+				if (!Files.isDirectory(countries)) {
+					var target = Files.createTempFile(collect_administrative_areas.class.getSimpleName() + "-", ".zip");
+					var uri = "https://naciscdn.org/naturalearth/10m/cultural/%s".formatted(countriesToUse);
+					System.err.printf("Downloading countries from %s%n", uri);
+					try (var httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build()) {
+						var response = httpClient.send(
+								HttpRequest.newBuilder(URI.create(uri)).header("User-Agent", USER_AGENT).GET().build(),
+								HttpResponse.BodyHandlers.ofFile(target));
+
+						if (response.statusCode() != 200) {
+							System.err.printf("Download failed: %d%n", response.statusCode());
+							throw new RuntimeException("No base country data and download failed");
+						}
+
+						var process = new ProcessBuilder("unzip", target.toAbsolutePath().toString(), "-d",
+								countries.toAbsolutePath().toString())
+							.start();
+						process.waitFor();
+					}
+					finally {
+						Files.deleteIfExists(target);
+					}
+				}
+
+				var gadmDir = borderDir.resolve("GADM");
+				if (!Files.isDirectory(gadmDir)) {
+					Files.createDirectories(gadmDir);
+				}
+
+				// Load the countries into a temporary table, no need to do this over and
+				// over again
+				var query = "CREATE TEMPORARY TABLE countries AS (SELECT adm0_a3 AS country_code, name_en AS name, geom FROM st_read(?))";
+				try (var stmt = connection.prepareStatement(query)) {
+					var shapefile = countries.resolve(countriesToUse.replace(".zip", ".shp"))
+						.toAbsolutePath()
+						.toString();
+					stmt.setString(1, shapefile);
+					stmt.execute();
 				}
 				connection.commit();
-				return new Areas(allGpxFiles, emailAddress, maxFiles, connection);
+
+				return new Areas(allGpxFiles, gadmDir, maxFiles, connection);
 			}
 		}
 
-		private Areas(Map<String, Path> allGpxFiles, String emailAddress, int maxFiles, Connection connection) {
+		private Areas(Map<String, Path> allGpxFiles, Path gadmDir, int maxFiles, Connection connection)
+				throws SQLException {
+
 			this.allGpxFiles = allGpxFiles;
-			this.emailAddress = emailAddress;
-			this.connection = connection;
+			this.gadmDir = gadmDir;
 			this.maxFiles = maxFiles;
-		}
+			this.connection = connection;
 
-		@Override
-		public void close() throws Exception {
-			if (this.connection != null) {
-				this.connection.close();
-			}
-			this.httpClient.close();
-		}
+			this.selectNewActivitiesStmt = connection.prepareStatement("""
+					SELECT garmin_id
+					FROM garmin_activities
+					WHERE gpx_available AND NOT administrative_areas_processed
+					  AND activity_type <> 'virtual_ride'
+					ORDER BY started_on ASC
+					LIMIT ?
+					""");
 
-		void collect() throws SQLException, IOException, InterruptedException {
+			this.selectCountriesStmt = connection.prepareStatement("""
+					SELECT c.country_code, c.name
+					FROM st_read(?, layer = 'tracks') t
+					JOIN countries c ON st_intersects(c.geom, t.geom)
+					""");
 
-			var files = findUnprocessedActivities();
-			var tmpFiles = new ArrayList<Path>();
+			this.selectAreaStmt = connection.prepareStatement("""
+					SELECT b.*
+					FROM st_read(?, layer = 'tracks') t
+					JOIN query_table(?) b ON st_intersects(b.geom, t.geom)
+					""");
 
-			try (var stmt = connection.prepareStatement("SELECT st_x(geom) AS long, st_y(geom) AS lat FROM st_read(?, layer = 'track_points')")) {
-				for (var file : files) {
-					var tmp = Files.createTempFile("collect-administrative-areas-", ".gpx");
-					try (var gis = new GZIPInputStream(new FileInputStream(file.path().toFile()))) {
-						Files.copy(gis, tmp, StandardCopyOption.REPLACE_EXISTING);
-					}
-					tmpFiles.add(tmp);
-
-					System.err.printf("Processing %d via %s%n", file.id(), tmp.toString());
-					stmt.setString(1, tmp.toString());
-					var polyline = new Polyline();
-					try (var points = stmt.executeQuery()) {
-						while (points.next()) {
-							polyline.add(points.getDouble("lat"), points.getDouble("long"));
-						}
-					}
-
-					storeAreas(file, lookupAreas(mapMatch(polyline)));
-				}
-			} finally {
-				for (Path tmpFile : tmpFiles) {
-					Files.deleteIfExists(tmpFile);
-				}
-			}
-		}
-
-		private void storeAreas(IdAndPath file, Set<List<Area>> areas) throws SQLException {
-			try (
-				var stmtArea = connection.prepareStatement("""
+			this.storeAreasStmt = connection.prepareStatement("""
 					INSERT INTO administrative_areas BY NAME
 					SELECT ? AS parent_id,
 					       ? AS country_code,
@@ -286,128 +244,190 @@ public class collect_administrative_areas implements Callable<Integer> {
 						   visited_first_on = least(visited_first_on, excluded.visited_first_on),
 						   visited_last_on = greatest(visited_last_on, excluded.visited_last_on),
 					RETURNING id
-					""")
-			) {
-				for (var hierarchy : areas) {
-					var parentId = -1L;
-					var countryCode = hierarchy.getFirst().code();
-					for (var area : hierarchy) {
-						stmtArea.setLong(1, parentId);
-						stmtArea.setString(2, countryCode);
-						stmtArea.setInt(3, area.level());
-						stmtArea.setString(4, area.name());
-						stmtArea.setLong(5, file.id());
-						stmtArea.execute();
+					""");
 
-						try (var rs = stmtArea.getResultSet()) {
-							rs.next();
-							parentId = rs.getLong("id");
+			this.updateStmt = connection.prepareStatement(
+					"UPDATE garmin_activities SET administrative_areas_processed = true WHERE garmin_id = ?");
+		}
+
+		@Override
+		public void close() throws Exception {
+			this.selectNewActivitiesStmt.close();
+			this.selectCountriesStmt.close();
+			this.selectAreaStmt.close();
+			this.storeAreasStmt.close();
+			this.connection.close();
+			this.httpClient.close();
+		}
+
+		void collect() throws Exception {
+
+			var files = findUnprocessedActivities();
+			var tmpFiles = new ArrayList<Path>();
+
+			try {
+				for (var file : files) {
+					var tmp = Files.createTempFile(collect_administrative_areas.class.getSimpleName() + "-", ".gpx");
+					try (var gis = new GZIPInputStream(new FileInputStream(file.path().toFile()))) {
+						Files.copy(gis, tmp, StandardCopyOption.REPLACE_EXISTING);
+					}
+					tmpFiles.add(tmp);
+
+					System.err.printf("Processing %d via %s%n", file.id(), tmp);
+					storeAreas(file, selectAreasByCountry(selectCountries(tmp)));
+				}
+			}
+			finally {
+				for (Path tmpFile : tmpFiles) {
+					Files.deleteIfExists(tmpFile);
+				}
+			}
+		}
+
+		private TrackWithCountries selectCountries(Path trackFile) throws Exception {
+
+			this.selectCountriesStmt.setString(1, trackFile.toAbsolutePath().toString());
+
+			var countries = new ArrayList<Area>();
+			try (var rs = this.selectCountriesStmt.executeQuery()) {
+				while (rs.next()) {
+					var countryCode = rs.getString("country_code");
+					if (bordersFor(countryCode).isEmpty()) {
+						System.err.printf("No boundaries for %s, skipping.%n", countryCode);
+						continue;
+					}
+					countries.add(new Area(0, countryCode, rs.getString("name")));
+				}
+			}
+			return new TrackWithCountries(trackFile, countries);
+		}
+
+		private Optional<Path> bordersFor(String countryCode) throws Exception {
+
+			var shapeDirectory = this.gadmDir.resolve("%s_%s_shp".formatted(GADM_PREFIX, countryCode));
+			if (Files.isDirectory(shapeDirectory)) {
+				return Optional.of(shapeDirectory);
+			}
+
+			var shapeZip = "%s.zip".formatted(shapeDirectory.getFileName().toString());
+			var shapeUri = URI
+				.create("https://geodata.ucdavis.edu/gadm/gadm%s/shp/%s".formatted(GADM_VERSION, shapeZip));
+			var zipFile = this.gadmDir.resolve(shapeZip);
+			System.err.printf("Downloading %s%n", shapeUri);
+			var response = this.httpClient.send(
+					HttpRequest.newBuilder(shapeUri).header("User-Agent", USER_AGENT).GET().build(),
+					HttpResponse.BodyHandlers.ofFile(zipFile));
+
+			try {
+				if (response.statusCode() != 200) {
+					System.err.printf("Download failed: %d%n", response.statusCode());
+					return Optional.empty();
+				}
+
+				var process = new ProcessBuilder("unzip", zipFile.toAbsolutePath().toString(), "-d",
+						shapeDirectory.toAbsolutePath().toString())
+					.start();
+				process.waitFor();
+			}
+			finally {
+				Files.deleteIfExists(zipFile);
+			}
+
+			return Optional.of(shapeDirectory);
+		}
+
+		private Set<List<Area>> selectAreasByCountry(TrackWithCountries trackWithCountries) throws Exception {
+
+			var result = new HashSet<List<Area>>();
+
+			for (var lvl0 : trackWithCountries.countries()) {
+				var shape = "%s_%s_shp".formatted(GADM_PREFIX, lvl0.code());
+				var shapeDirectory = this.gadmDir.resolve(shape);
+
+				var maxLevel = 0;
+				var shapePattern = Pattern.compile("%s_%s_\\d+.shp".formatted(GADM_PREFIX, lvl0.code()))
+					.asMatchPredicate();
+				try (var allShapes = Files.list(shapeDirectory)
+					.filter(p -> shapePattern.test(p.getFileName().toString()))) {
+					maxLevel = (int) (allShapes.count() - 1);
+				}
+				var shapeFile = this.gadmDir
+					.resolve(shapeDirectory, Path.of("%s_%s_%d.shp".formatted(GADM_PREFIX, lvl0.code(), maxLevel)))
+					.toAbsolutePath();
+				var tableName = "\"%s\"".formatted(shapeFile.getFileName().toString());
+
+				// We will most likely use this again
+				try (var stmt = this.connection.prepareStatement(
+						"CREATE TEMPORARY TABLE IF NOT EXISTS %s AS SELECT * FROM st_read(?)".formatted(tableName))) {
+					stmt.setString(1, shapeFile.toString());
+					stmt.execute();
+				}
+
+				this.selectAreaStmt.setString(1, trackWithCountries.file().toString());
+				this.selectAreaStmt.setString(2, tableName);
+
+				try (var rs = this.selectAreaStmt.executeQuery()) {
+					while (rs.next()) {
+						var areas = new ArrayList<Area>();
+						areas.add(lvl0);
+						for (int l = 1; l < maxLevel + 1; ++l) {
+							areas.add(new Area(l, lvl0.code(), rs.getString("NAME_%d".formatted(l))));
 						}
+						result.add(areas);
 					}
 				}
-
-				try (var updateStmt = connection.prepareStatement("UPDATE garmin_activities SET administrative_areas_processed = true WHERE garmin_id = ?")) {
-					updateStmt.setLong(1, file.id());
-					updateStmt.executeUpdate();
-				}
-				connection.commit();
 			}
+
+			return result;
 		}
 
-		//
-		// See https://valhalla.github.io/valhalla/api/map-matching/api-reference/
-		//
-		private List<Map<String, Object>> mapMatch(Polyline polyline) throws IOException, InterruptedException {
-			var request = HttpRequest.newBuilder(URI.create("https://valhalla1.openstreetmap.de/trace_attributes"))
-				.header("User-Agent", USER_AGENT)
-				.POST(HttpRequest.BodyPublishers.ofString(om.writeValueAsString(Map.of(
-					"encoded_polyline", polyline.toString(),
-					"costing", "auto",
-					"filters", Map.of("attributes", List.of("edge.way_id"), "action", "include")
-				))))
-				.build();
+		private void storeAreas(IdAndPath file, Set<List<Area>> areas) throws SQLException {
 
-			var mapMatchResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-			if (mapMatchResponse.statusCode() != 200) {
-				return List.of();
-			}
+			for (var hierarchy : areas) {
+				var parentId = -1L;
+				var countryCode = hierarchy.getFirst().code();
+				for (var area : hierarchy) {
+					this.storeAreasStmt.setLong(1, parentId);
+					this.storeAreasStmt.setString(2, countryCode);
+					this.storeAreasStmt.setInt(3, area.level());
+					this.storeAreasStmt.setString(4, area.name());
+					this.storeAreasStmt.setLong(5, file.id());
+					this.storeAreasStmt.execute();
 
-			return (List<Map<String, Object>>) om.readValue(mapMatchResponse.body(), MAP_OF_OBJECTS).get("edges");
-		}
-
-		//
-		// See https://nominatim.org/release-docs/latest/api/Lookup/
-		//
-		private Set<List<Area>> lookupAreas(List<Map<String, Object>> edges) throws
-			IOException, InterruptedException {
-
-			var newIds = edges.stream().map(edge -> (Number) edge.get("way_id"))
-				.filter(Predicate.not(knownIds::contains))
-				.collect(Collectors.toSet());
-
-			this.knownIds.addAll(newIds);
-
-			var requests = newIds.stream().gather(Gatherers.windowFixed(50))
-				.map(ids -> ids.stream().map(id -> "W" + id).collect(Collectors.joining(",")))
-				.map(ids -> HttpRequest.newBuilder(URI.create("https://nominatim.openstreetmap.org/lookup?format=geocodejson&addressdetails=1&osm_ids=%s&email=%s".formatted(ids, emailAddress)))
-					.header("User-Agent", USER_AGENT)
-					.header("Accept-Language", "en")
-					.GET().build()).toList();
-
-			var countries = new HashSet<List<Area>>();
-			for (var httpRequest : requests) {
-				var response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
-				if (response.statusCode() != 200) {
-					continue;
-				}
-				var features = (List<Map<String, Object>>) om.readValue(response.body(), MAP_OF_OBJECTS).get("features");
-
-				for (var feature : features) {
-					var properties = (Map<String, Object>) ((Map<String, Object>) feature.get("properties")).get("geocoding");
-					var country = new Area(2, (String) properties.get("country_code"), (String) properties.get("country"));
-					var areas = Stream.concat(
-							Stream.of(country),
-							((Map<String, String>) properties.get("admin")).entrySet()
-								.stream()
-								.map(e -> new Area(Integer.parseInt(e.getKey().substring(5)), null, e.getValue()))
-								.distinct())
-						.sorted(Comparator.comparing(Area::level))
-						.toList();
-					countries.add(areas);
-				}
-				try {
-					// nominatim ask for not more than 1 request per second, so between 1 and 5 seconds is probably good enough.
-					Thread.sleep(ThreadLocalRandom.current().nextInt(5) * 1000);
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
+					try (var rs = this.storeAreasStmt.getResultSet()) {
+						rs.next();
+						parentId = rs.getLong("id");
+					}
 				}
 			}
-			return countries;
+
+			this.updateStmt.setLong(1, file.id());
+			this.updateStmt.executeUpdate();
+			this.connection.commit();
 		}
 
 		private Set<IdAndPath> findUnprocessedActivities() throws SQLException {
-			try (
-				var stmt = connection.prepareStatement("""
-					SELECT garmin_id
-					FROM garmin_activities
-					WHERE gpx_available
-					  AND NOT administrative_areas_processed
-					ORDER BY started_on ASC
-					LIMIT ?""")
-			) {
-				stmt.setInt(1, maxFiles);
-				var unprocessedActivities = new HashSet<IdAndPath>();
-				try (var result = stmt.executeQuery()) {
-					while (result.next()) {
-						var id = result.getLong(1);
-						var path = allGpxFiles.get(id + ".gpx.gz");
-						if (path != null) {
-							unprocessedActivities.add(new IdAndPath(id, path));
-						}
+
+			this.selectNewActivitiesStmt.setInt(1, this.maxFiles);
+			var unprocessedActivities = new HashSet<IdAndPath>();
+			try (var result = this.selectNewActivitiesStmt.executeQuery()) {
+				while (result.next()) {
+					var id = result.getLong(1);
+					var path = this.allGpxFiles.get(id + ".gpx.gz");
+					if (path != null) {
+						unprocessedActivities.add(new IdAndPath(id, path));
 					}
 				}
-				return unprocessedActivities;
 			}
+			return unprocessedActivities;
 		}
+
+		record IdAndPath(Long id, Path path) {
+		}
+
+		record TrackWithCountries(Path file, List<Area> countries) {
+		}
+
 	}
+
 }
