@@ -16,7 +16,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Types;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -128,8 +127,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 
 		private final Connection connection;
 
-		private final PreparedStatement selectNewActivitiesStmt;
-
 		private final PreparedStatement selectCountriesStmt;
 
 		private final PreparedStatement selectAreaStmt;
@@ -208,15 +205,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 			this.maxFiles = maxFiles;
 			this.connection = connection;
 
-			this.selectNewActivitiesStmt = connection.prepareStatement("""
-					SELECT garmin_id
-					FROM garmin_activities
-					WHERE gpx_available AND NOT administrative_areas_processed
-					  AND activity_type <> 'virtual_ride'
-					ORDER BY started_on ASC
-					LIMIT ?
-					""");
-
 			this.selectCountriesStmt = connection.prepareStatement("""
 					SELECT c.country_code, c.name
 					FROM st_read(?, layer = 'tracks') t
@@ -254,10 +242,10 @@ public class collect_administrative_areas implements Callable<Integer> {
 
 		@Override
 		public void close() throws Exception {
-			this.selectNewActivitiesStmt.close();
 			this.selectCountriesStmt.close();
 			this.selectAreaStmt.close();
 			this.storeAreasStmt.close();
+			this.updateStmt.close();
 			this.connection.close();
 			this.httpClient.close();
 		}
@@ -277,6 +265,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 
 					System.err.printf("Processing %d via %s%n", file.id(), tmp);
 					storeAreas(file, selectAreasByCountry(selectCountries(tmp)));
+					this.connection.commit();
 				}
 
 			}
@@ -289,6 +278,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 			// As countries may get updated several times per activity,
 			// we must fix them after the fact
 			computeCountryStats();
+			this.connection.commit();
 		}
 
 		private void computeCountryStats() throws SQLException {
@@ -310,10 +300,9 @@ public class collect_administrative_areas implements Callable<Integer> {
 					FROM fix
 					WHERE level = 0 AND t.country_code = fix.country_code
 					""";
-			try (var stmt = connection.createStatement()) {
+			try (var stmt = this.connection.createStatement()) {
 				stmt.execute(query);
 			}
-			connection.commit();
 		}
 
 		private TrackWithCountries selectCountries(Path trackFile) throws Exception {
@@ -435,19 +424,27 @@ public class collect_administrative_areas implements Callable<Integer> {
 
 			this.updateStmt.setLong(1, file.id());
 			this.updateStmt.executeUpdate();
-			this.connection.commit();
 		}
 
 		private Set<IdAndPath> findUnprocessedActivities() throws SQLException {
 
-			this.selectNewActivitiesStmt.setInt(1, this.maxFiles);
 			var unprocessedActivities = new HashSet<IdAndPath>();
-			try (var result = this.selectNewActivitiesStmt.executeQuery()) {
-				while (result.next()) {
-					var id = result.getLong(1);
-					var path = this.allGpxFiles.get(id + ".gpx.gz");
-					if (path != null) {
-						unprocessedActivities.add(new IdAndPath(id, path));
+			try (var stmt = this.connection.prepareStatement("""
+					SELECT garmin_id
+					FROM garmin_activities
+					WHERE gpx_available AND NOT administrative_areas_processed
+					  AND activity_type <> 'virtual_ride'
+					ORDER BY started_on ASC
+					LIMIT ?
+					""")) {
+				stmt.setInt(1, this.maxFiles);
+				try (var rs = stmt.executeQuery()) {
+					while (rs.next()) {
+						var id = rs.getLong(1);
+						var path = this.allGpxFiles.get(id + ".gpx.gz");
+						if (path != null) {
+							unprocessedActivities.add(new IdAndPath(id, path));
+						}
 					}
 				}
 			}

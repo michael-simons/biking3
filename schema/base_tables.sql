@@ -117,11 +117,6 @@ CREATE TABLE IF NOT EXISTS garmin_activities (
 ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS gpx_available BOOLEAN DEFAULT false;
 
 --
--- Add a flag whether administrative areas for this activity have been computed
---
-ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS administrative_areas_processed BOOLEAN DEFAULT false;
-
---
 -- Add a flag whether the GPX data was processed into tiles or not
 --
 CREATE TABLE IF NOT EXISTS processed_zoom_levels (
@@ -299,6 +294,7 @@ CREATE TABLE IF NOT EXISTS tiles (
 --
 -- Explored administrative areas
 --
+ALTER TABLE garmin_activities ADD COLUMN IF NOT EXISTS administrative_areas_processed BOOLEAN DEFAULT false;
 CREATE SEQUENCE IF NOT EXISTS administrative_area_id;
 CREATE TABLE IF NOT EXISTS administrative_areas (
     id BIGINT PRIMARY KEY DEFAULT(nextval('administrative_area_id')),
