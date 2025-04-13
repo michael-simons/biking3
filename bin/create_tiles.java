@@ -196,7 +196,7 @@ public class create_tiles implements Callable<Integer> {
 				var stmt = connection.prepareStatement("""
 					SELECT g.garmin_id
 					FROM garmin_activities g ANTI JOIN processed_zoom_levels z ON g.garmin_id = z.garmin_id AND z.zoom = ?
-					WHERE gpx_available
+					WHERE gpx_available AND activity_type <> 'virtual_ride'
 					ORDER BY started_on DESC""")
 			) {
 				stmt.setInt(1, this.zoom);
