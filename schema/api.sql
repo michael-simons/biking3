@@ -664,7 +664,7 @@ WITH RECURSIVE
       WHERE NOT EXISTS (SELECT 1 FROM administrative_areas hypothetical_child WHERE hypothetical_child.parent_id = c.id)
    )
 )
-SELECT coalesce(list(struct_pack(*columns(c_tree.* EXCLUDE (country_code, level, parent_id) REPLACE (ST_AsGeoJSON(envelope)) AS envelope)) ORDER BY country_code)::JSON, '[]') AS areas
+SELECT coalesce(list(struct_pack(*columns(c_tree.* EXCLUDE (country_code, level, parent_id) REPLACE (ST_AsGeoJSON(envelope)) AS envelope)) ORDER BY name)::JSON, '[]') AS areas
 FROM c_tree
 WHERE level=0;
 COMMENT ON VIEW v_explorer_areas IS 'Quick overview over the visited areas.';
