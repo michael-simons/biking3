@@ -16,6 +16,7 @@ import functools
 import gpxpy
 import gzip
 import jinja2.exceptions
+import json
 import pandas
 import os
 
@@ -194,15 +195,17 @@ def site(database: str):
 
         with db.cursor() as con:
             result = con.execute("SELECT feature_collection FROM query_table(?) WHERE zoom = ?",
-                                   ['v_explorer_' + feature_type, zoom]).fetchone()
+                                 ['v_explorer_' + feature_type, zoom]).fetchone()
             return [] if result is None else result[0], {'content-type': 'application/json'}
 
     @app.route("/explorer/", )
     def explorer():
         thunderforest_api_key = flask.current_app.jinja_env.globals.get('thunderforest_api_key')
         with db.cursor() as con:
+            result = con.execute("FROM v_explorer_areas").fetchone()
+            areas = [] if result is None else result[0]
             summary = con.execute("FROM v_explorer_summary WHERE zoom = 14").df()
-            return flask.render_template('explorer.html.jinja2', summary=summary,
+            return flask.render_template('explorer.html.jinja2', summary=summary, areas=json.loads(areas),
                                          thunderforest_api_key=thunderforest_api_key, max_garmin=max_garmin)
 
     @app.route("/unexplored", methods=['POST'])

@@ -46,11 +46,19 @@
             }
 
             img.activity-map {
-               max-width: 500px;
+                max-width: 500px;
             }
 
-            .popover{
-               max-width: 672px !important;
+            .popover {
+                max-width: 672px !important;
+            }
+
+            [data-bs-toggle="collapse"].collapsed .if-not-collapsed {
+                display: none;
+            }
+
+            [data-bs-toggle="collapse"]:not(.collapsed) .if-collapsed {
+                display: none;
             }
         </style>
     </head>

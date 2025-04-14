@@ -635,7 +635,7 @@ COMMENT ON VIEW v_explorer_squares IS 'The biggest square explored.';
 -- https://schinckel.net/2017/07/01/tree-data-as-a-nested-list-redux/
 -- Found via https://stackoverflow.com/a/68861529
 --
-CREATE OR REPLACE VIEW v_visited_areas AS
+CREATE OR REPLACE VIEW v_explorer_areas AS
 WITH RECURSIVE
   maxlvl AS (
     SELECT max(level) maxlvl FROM administrative_areas
@@ -648,10 +648,10 @@ WITH RECURSIVE
     UNION
 
     (
-      SELECT branch_parent.*, list(branch_child)
+      SELECT branch_parent.*, list(branch_child ORDER BY branch_child->>'$.name')
       FROM (
         SELECT branch_parent,
-               struct_pack(*columns(branch_child.* EXCLUDE (country_code, level, id, parent_id, visited_first_on)))::JSON AS branch_child
+               struct_pack(*columns(branch_child.* EXCLUDE (country_code, level, parent_id)))::JSON AS branch_child
         FROM administrative_areas branch_parent
         JOIN c_tree branch_child ON branch_child.parent_id = branch_parent.id
       ) branch
@@ -664,10 +664,10 @@ WITH RECURSIVE
       WHERE NOT EXISTS (SELECT 1 FROM administrative_areas hypothetical_child WHERE hypothetical_child.parent_id = c.id)
    )
 )
-SELECT struct_pack(*columns(
-         c_tree.* EXCLUDE (country_code, level, id, parent_id, visited_first_on))
+SELECT list(
+         struct_pack(*columns(c_tree.* EXCLUDE (country_code, level, parent_id))
+         )ORDER BY country_code
        )::JSON AS areas
 FROM c_tree
-WHERE level=0
-ORDER BY country_code;
-COMMENT ON VIEW v_visited_areas IS 'Quick overview over the visited areas.';
+WHERE level=0;
+COMMENT ON VIEW v_explorer_areas IS 'Quick overview over the visited areas.';
