@@ -73,10 +73,10 @@
                 </div>
             </form>
         </div>
-        <div class="col-9">
+        <div class="col-lg-9 col-md-12">
             <div id="map" style="width: 100%; height: 60vh;"></div>
         </div>
-        <div class="col-3">
+        <div class="col-lg-3 col-md-12 mt-lg-auto mt-3">
             {% macro list_areas(parent, areas, level) %}
                 {% set class = 'collapse' if level == 2 else '' %}
                 <ul id="cf-{{ parent['id'] }}" class="{{ class }}">
