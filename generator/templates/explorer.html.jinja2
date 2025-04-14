@@ -77,7 +77,8 @@
             <div id="map" style="width: 100%; height: 60vh;"></div>
         </div>
         <div class="col-lg-3 col-md-12 mt-lg-auto mt-3">
-            {% macro list_areas(parent, areas, level) %}
+            {% macro list_areas(parent, areas) %}
+                {% set level = parent['level'] + 1 %}
                 {% set class = 'collapse' if level == 2 else '' %}
                 <ul id="cf-{{ parent['id'] }}" class="{{ class }}">
                     {% for area in areas %}
@@ -92,7 +93,7 @@
                                         <span title="Collapse this item" class="if-not-collapsed">⬆️</span>
                                     </button>
                                 {% endif %}
-                                {{ list_areas(area, area['children'], level + 1) }}
+                                {{ list_areas(area, area['children']) }}
                             </li>
                         {% endif %}
                     {% endfor %}
@@ -114,7 +115,7 @@
                                 <div class="overflow-scroll" style="max-height: 40vh">
                                     First activity on <strong>{{ country['visited_first_on'] }}</strong>, last activity
                                     <strong>{{ country['visited_last_on'] }}</strong>.
-                                    {{ list_areas(country, country['children'], 1) }}
+                                    {{ list_areas(country, country['children']) }}
                                 </div>
                             </div>
                         </div>
