@@ -81,9 +81,10 @@
                 {% set class = 'collapse' if level == 2 else '' %}
                 <ul id="cf-{{ parent['id'] }}" class="{{ class }}">
                     {% for area in areas %}
-                        <!-- Germany has many "Gemeinschaftsfreie Gemeinde" with the same name as the city on the next level, superfluous for this. -->
-                        {% if level <= 2 or (parent['name'] != area['name'] and not area['name'].startswith('n.a.')) %}
-                            <li>{{ area['name'] }}
+                        {% if level <= 2 or ((parent['name'] != area['name'] or parent['children']|count > 1) and not area['name'].startswith('n.a.')) %}
+                            <li><a href="#" onclick="panTo(this, event)"
+                                   data-envelope='{{ area['envelope']|tojson|safe }}'
+                                   data-visited_last_on="{{ area['visited_last_on'] }}">{{ area['name'] }}</a>
                                 {% if level <= 1 %}
                                     <button type="button" class="btn p-0" data-bs-toggle="collapse"
                                             data-bs-target="#cf-{{ area['id'] }}">
@@ -110,9 +111,11 @@
                         <div id="c-{{ country['id'] }}" class="accordion-collapse collapse"
                              data-bs-parent="#accordionExample">
                             <div class="accordion-body small">
-                                First activity on <strong>{{ country['visited_first_on'] }}</strong>, last activity
-                                <strong>{{ country['visited_last_on'] }}</strong>.
-                                {{ list_areas(country, country['children'], 1) }}
+                                <div class="overflow-scroll" style="max-height: 40vh">
+                                    First activity on <strong>{{ country['visited_first_on'] }}</strong>, last activity
+                                    <strong>{{ country['visited_last_on'] }}</strong>.
+                                    {{ list_areas(country, country['children'], 1) }}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -212,6 +215,22 @@
                 });
             {% endif %}
             map.setView([50.7753, 6.0839], 14);
+
+            let lastArea = null;
+            window.panTo = function (area, event) {
+                if (lastArea !== null) {
+                    lastArea.remove();
+                }
+
+                lastArea = L.geoJSON(JSON.parse(area.dataset.envelope))
+                    .addTo(map)
+                    .bindPopup('<b>' + area.innerHTML + '</b><br />Last activity on ' + area.dataset.visited_last_on)
+                    .openPopup()
+                let bounds = lastArea.getBounds().pad(0.05);
+
+                map.fitBounds(bounds);
+                event.preventDefault();
+            }
 
             const customizedAttributionControl = L.control.attribution().addTo(map);
             customizedAttributionControl.setPrefix('<a href="https://leafletjs.com/">Leaflet</a>');

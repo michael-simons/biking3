@@ -17,6 +17,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -113,10 +114,12 @@ public class collect_administrative_areas implements Callable<Integer> {
 	 * @param level the level of the area
 	 * @param code the ISO 3166-1 alpha-3 code, if available
 	 * @param name the local name of the area
+	 * @param envelope the geometry
 	 */
-	record Area(int level, String code, String name) {
+	record Area(int level, String code, String name, String envelope) {
 	}
 
+	@SuppressWarnings("SqlSourceToSinkFlow")
 	static final class Areas implements AutoCloseable {
 
 		private final Map<String, Path> allGpxFiles;
@@ -128,8 +131,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 		private final Connection connection;
 
 		private final PreparedStatement selectCountriesStmt;
-
-		private final PreparedStatement selectAreaStmt;
 
 		private final PreparedStatement storeAreasStmt;
 
@@ -211,12 +212,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 					JOIN countries c ON st_intersects(c.geom, t.geom)
 					""");
 
-			this.selectAreaStmt = connection.prepareStatement("""
-					SELECT b.*
-					FROM st_read(?, layer = 'tracks') t
-					JOIN query_table(?) b ON st_intersects(b.geom, t.geom)
-					""");
-
 			this.storeAreasStmt = connection.prepareStatement("""
 					WITH lvl AS (SELECT ? AS value)
 					INSERT INTO administrative_areas BY NAME
@@ -224,6 +219,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 					       ? AS country_code,
 					       lvl.value AS level,
 					       ? AS name,
+					       ST_GeomFromHEXWKB(?) as envelope,
 					       if(lvl.value = 0, null, 1) AS visited_count,
 					       if(lvl.value = 0, null, started_on::date) AS visited_first_on,
 					       if(lvl.value = 0, null, started_on::date) AS visited_last_on
@@ -243,7 +239,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 		@Override
 		public void close() throws Exception {
 			this.selectCountriesStmt.close();
-			this.selectAreaStmt.close();
 			this.storeAreasStmt.close();
 			this.updateStmt.close();
 			this.connection.close();
@@ -256,6 +251,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 			var tmpFiles = new ArrayList<Path>();
 
 			try {
+				// DuckDB can't read Spatial files with globbing, so we iterate them
 				for (var file : files) {
 					var tmp = Files.createTempFile(collect_administrative_areas.class.getSimpleName() + "-", ".gpx");
 					try (var gis = new GZIPInputStream(new FileInputStream(file.path().toFile()))) {
@@ -317,9 +313,10 @@ public class collect_administrative_areas implements Callable<Integer> {
 						System.err.printf("No boundaries for %s, skipping.%n", countryCode);
 						continue;
 					}
-					countries.add(new Area(0, countryCode, rs.getString("name")));
+					countries.add(new Area(0, countryCode, rs.getString("name"), null));
 				}
 			}
+
 			return new TrackWithCountries(trackFile, countries);
 		}
 
@@ -361,40 +358,69 @@ public class collect_administrative_areas implements Callable<Integer> {
 
 			var result = new HashSet<List<Area>>();
 
-			for (var lvl0 : trackWithCountries.countries()) {
-				var shape = "%s_%s_shp".formatted(GADM_PREFIX, lvl0.code());
+			for (var country : trackWithCountries.countries()) {
+				var countryCode = country.code();
+				var shape = "%s_%s_shp".formatted(GADM_PREFIX, countryCode);
 				var shapeDirectory = this.gadmDir.resolve(shape);
 
 				var maxLevel = 0;
-				var shapePattern = Pattern.compile("%s_%s_\\d+.shp".formatted(GADM_PREFIX, lvl0.code()))
+				var shapePattern = Pattern.compile("%s_%s_\\d+.shp".formatted(GADM_PREFIX, countryCode))
 					.asMatchPredicate();
 				try (var allShapes = Files.list(shapeDirectory)
 					.filter(p -> shapePattern.test(p.getFileName().toString()))) {
 					maxLevel = (int) (allShapes.count() - 1);
 				}
-				var shapeFile = this.gadmDir
-					.resolve(shapeDirectory, Path.of("%s_%s_%d.shp".formatted(GADM_PREFIX, lvl0.code(), maxLevel)))
-					.toAbsolutePath();
-				var tableName = "\"%s\"".formatted(shapeFile.getFileName().toString());
+				var tableNames = new HashMap<Integer, String>();
+				// We will most likely use them again
+				for (int l = 0; l <= maxLevel; ++l) {
+					var shapeFile = this.gadmDir
+						.resolve(shapeDirectory, Path.of("%s_%s_%d.shp".formatted(GADM_PREFIX, countryCode, l)))
+						.toAbsolutePath();
+					var tableName = "\"%s\"".formatted(shapeFile.getFileName().toString());
+					try (var stmt = this.connection.prepareStatement(
+							"CREATE TEMPORARY TABLE IF NOT EXISTS %s AS SELECT *, ST_AsHEXWKB(ST_Envelope(geom)) AS envelope FROM st_read(?)"
+								.formatted(tableName))) {
+						stmt.setString(1, shapeFile.toString());
+						stmt.execute();
+					}
 
-				// We will most likely use this again
-				try (var stmt = this.connection.prepareStatement(
-						"CREATE TEMPORARY TABLE IF NOT EXISTS %s AS SELECT * FROM st_read(?)".formatted(tableName))) {
-					stmt.setString(1, shapeFile.toString());
-					stmt.execute();
+					tableNames.put(l, tableName);
 				}
 
-				this.selectAreaStmt.setString(1, trackWithCountries.file().toString());
-				this.selectAreaStmt.setString(2, tableName);
+				var base = new StringBuilder("""
+						FROM st_read(?, layer = 'tracks') t
+						JOIN query_table(?) l%1$d ON st_intersects(l%1$d.geom, t.geom)
+						""".formatted(maxLevel));
 
-				try (var rs = this.selectAreaStmt.executeQuery()) {
-					while (rs.next()) {
-						var areas = new ArrayList<Area>();
-						areas.add(lvl0);
-						for (int l = 1; l < maxLevel + 1; ++l) {
-							areas.add(new Area(l, lvl0.code(), rs.getString("NAME_%d".formatted(l))));
+				for (int lvl = 0; lvl < maxLevel; ++lvl) {
+					base.append("JOIN query_table(?) l%1$d ON ".formatted(lvl));
+					for (int p = 0; p <= lvl; ++p) {
+						base.append("l%1$d.GID_%3$d = l%2$d.GID_%3$d AND ".formatted(lvl, maxLevel, p));
+					}
+					base.delete(base.length() - 4, base.length()).append("\n");
+				}
+
+				base.append("SELECT l%1$d.* EXCLUDE(geom), ".formatted(maxLevel));
+				for (int lvl = 0; lvl <= maxLevel; ++lvl) {
+					base.append("l%1$d.envelope AS envelope_%1$d, ".formatted(lvl));
+				}
+
+				try (var stmt = this.connection.prepareStatement(base.toString())) {
+					stmt.setString(1, trackWithCountries.file().toString());
+					stmt.setString(2, tableNames.get(maxLevel));
+					for (int lvl = 0; lvl < maxLevel; ++lvl) {
+						stmt.setString(3 + lvl, tableNames.get(lvl));
+					}
+					try (var rs = stmt.executeQuery()) {
+						while (rs.next()) {
+							var areas = new ArrayList<Area>();
+							for (int lvl = 0; lvl <= maxLevel; ++lvl) {
+								areas.add(new Area(lvl, countryCode,
+										rs.getString((lvl != 0) ? "NAME_%d".formatted(lvl) : "COUNTRY"),
+										rs.getString("envelope_%d".formatted(lvl))));
+							}
+							result.add(areas);
 						}
-						result.add(areas);
 					}
 				}
 			}
@@ -412,7 +438,8 @@ public class collect_administrative_areas implements Callable<Integer> {
 					this.storeAreasStmt.setLong(2, parentId);
 					this.storeAreasStmt.setString(3, countryCode);
 					this.storeAreasStmt.setString(4, area.name());
-					this.storeAreasStmt.setLong(5, file.id());
+					this.storeAreasStmt.setString(5, area.envelope());
+					this.storeAreasStmt.setLong(6, file.id());
 					this.storeAreasStmt.execute();
 
 					try (var rs = this.storeAreasStmt.getResultSet()) {
@@ -423,7 +450,7 @@ public class collect_administrative_areas implements Callable<Integer> {
 			}
 
 			this.updateStmt.setLong(1, file.id());
-			this.updateStmt.executeUpdate();
+			this.updateStmt.execute();
 		}
 
 		private Set<IdAndPath> findUnprocessedActivities() throws SQLException {

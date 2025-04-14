@@ -305,5 +305,6 @@ CREATE TABLE IF NOT EXISTS administrative_areas (
     visited_count INTEGER NULL,
     visited_first_on DATE NULL,
     visited_last_on DATE NULL,
+    envelope GEOMETRY NOT NULL,
     CONSTRAINT unique_area UNIQUE(parent_id, name)
 );
