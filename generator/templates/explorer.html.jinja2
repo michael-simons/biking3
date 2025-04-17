@@ -85,6 +85,7 @@
                         {% if level <= 2 or ((parent['name'] != area['name'] or parent['children']|count > 1) and not area['name'].startswith('n.a.')) %}
                             <li><a href="#" onclick="panTo(this, event)"
                                    data-envelope='{{ area['envelope']|tojson|safe }}'
+                                   data-coverage='{{ area['coverage']|tojson|safe }}'
                                    data-visited_last_on="{{ area['visited_last_on'] }}">{{ area['name'] }}</a>
                                 {% if level <= 1 %}
                                     <button type="button" class="btn p-0" data-bs-toggle="collapse"
@@ -222,11 +223,16 @@
                 if (lastArea !== null) {
                     lastArea.remove();
                 }
-
+                const zoom = parseInt(document.getElementById("tiles-control").elements["tile-size-choice"].value.slice(1));
+                const coverage = JSON.parse(area.dataset.coverage).filter(r => r.zoom === zoom)[0].percentage;
                 lastArea = L.geoJSON(JSON.parse(area.dataset.envelope))
                     .addTo(map)
-                    .bindPopup('<b>' + area.innerHTML + '</b><br />Last activity on ' + area.dataset.visited_last_on)
-                    .openPopup()
+                    .bindPopup('<b>' + area.innerHTML + '</b><br />Last activity on <b>' + area.dataset.visited_last_on + '</b><br />Coverage on zoom level ' + zoom + ' is <b>' + coverage + '%</b>')
+                    .openPopup();
+                lastArea.getPopup().on('remove', function () {
+                    lastArea.remove();
+                });
+
                 let bounds = lastArea.getBounds().pad(0.05);
 
                 map.fitBounds(bounds);

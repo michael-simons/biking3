@@ -308,3 +308,7 @@ CREATE TABLE IF NOT EXISTS administrative_areas (
     envelope GEOMETRY NOT NULL,
     CONSTRAINT unique_area UNIQUE(parent_id, name)
 );
+ALTER TABLE administrative_areas ADD COLUMN IF NOT EXISTS coverage STRUCT(
+    zoom UTINYINT,
+    percentage DECIMAL(5, 2)
+)[];

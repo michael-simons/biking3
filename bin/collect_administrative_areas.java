@@ -119,7 +119,6 @@ public class collect_administrative_areas implements Callable<Integer> {
 	record Area(int level, String code, String name, String envelope) {
 	}
 
-	@SuppressWarnings("SqlSourceToSinkFlow")
 	static final class Areas implements AutoCloseable {
 
 		private final Map<String, Path> allGpxFiles;
@@ -271,13 +270,16 @@ public class collect_administrative_areas implements Callable<Integer> {
 				}
 			}
 
-			// As countries may get updated several times per activity,
-			// we must fix them after the fact
 			computeCountryStats();
+			this.connection.commit();
+
+			computeCoverage();
 			this.connection.commit();
 		}
 
 		private void computeCountryStats() throws SQLException {
+			// As countries may get updated several times per activity,
+			// we must fix them after the fact
 			var query = """
 					WITH fix AS (
 					  SELECT country_code,
@@ -295,6 +297,27 @@ public class collect_administrative_areas implements Callable<Integer> {
 					  visited_last_on = fix.visited_last_on
 					FROM fix
 					WHERE level = 0 AND t.country_code = fix.country_code
+					""";
+			try (var stmt = this.connection.createStatement()) {
+				stmt.execute(query);
+			}
+		}
+
+		private void computeCoverage() throws SQLException {
+			var query = """
+					WITH areas AS (
+					   SELECT a.id, a.envelope, t.zoom, sum(ST_Area_Spheroid(ST_FlipCoordinates(t.geom))) AS covered
+					   FROM administrative_areas a
+					   JOIN tiles t on ST_Intersects(a.envelope, t.geom)
+					   GROUP BY ALL
+					), coverage AS (
+					   SELECT id, list({'zoom': zoom, 'percentage': CAST(round(least(100, 100/ST_Area_Spheroid(ST_FlipCoordinates(areas.envelope))*covered),2)  AS DECIMAL(5,2))}) AS value
+					   FROM areas GROUP BY id
+					)
+					UPDATE administrative_areas
+					SET coverage = coverage.value
+					FROM coverage
+					WHERE administrative_areas.id = coverage.id
 					""";
 			try (var stmt = this.connection.createStatement()) {
 				stmt.execute(query);
