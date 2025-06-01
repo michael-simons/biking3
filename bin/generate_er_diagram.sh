@@ -14,7 +14,7 @@ COPY (
     WITH hlp AS (
         SELECT referenced_table, c.table_name,
                trim(string_agg(d.comment, ' ')) AS comment,
-               list_reduce(constraint_column_names, (x,y) -> concat(x, ',', y)) AS columns
+               list_reduce(constraint_column_names, lambda x,y: concat(x, ',', y)) AS columns
         FROM duckdb_constraints() c
         JOIN duckdb_columns d ON d.table_name = c.table_name AND list_contains(c.constraint_column_names, d.column_name)
         WHERE constraint_type = 'FOREIGN KEY'

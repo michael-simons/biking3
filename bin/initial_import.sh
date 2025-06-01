@@ -41,7 +41,7 @@ SELECT name, type, one_time_only FROM read_csv_auto('$CSV_DIR/events.csv', heade
 ON CONFLICT (name) DO NOTHING;
 
 WITH incoming AS (
-  SELECT name, achieved_at, distance, list_transform(split(duration,':'), x -> x::integer) as time
+  SELECT name, achieved_at, distance, list_transform(split(duration,':'), lambda x: x::integer) as time
   FROM '$CSV_DIR/results.csv'
 ) 
 INSERT INTO results BY NAME

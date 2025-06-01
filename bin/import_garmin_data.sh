@@ -25,10 +25,10 @@ duckdb "$DB" -s "
 garmin-export-fitness-metrics "$GARMIN_ARCHIVE" |
 duckdb "$DB" -s "
   INSERT INTO health_metrics BY NAME (
-    SELECT COLUMNS(c -> c NOT LIKE 'bp\_%' ESCAPE '\'),
+    SELECT COLUMNS(lambda c: c NOT LIKE 'bp\_%' ESCAPE '\'),
            CASE WHEN bp_systolic IS NOT NULL AND bp_diastolic IS NOT NULL THEN
-              {'systolic':  list_reduce(split(bp_systolic, '-'), (l, h) -> {low: l::UTINYINT, high: h::UTINYINT}),
-               'diastolic': list_reduce(split(bp_diastolic, '-'), (l, h) -> {low: l::UTINYINT, high: h::UTINYINT}),
+              {'systolic':  list_reduce(split(bp_systolic, '-'), lambda l, h: {low: l::UTINYINT, high: h::UTINYINT}),
+               'diastolic': list_reduce(split(bp_diastolic, '-'), lambda l, h: {low: l::UTINYINT, high: h::UTINYINT}),
                'pulse':     bp_pulse::UTINYINT}
            ELSE NULL END AS blood_pressure
     FROM read_csv_auto('/dev/stdin')

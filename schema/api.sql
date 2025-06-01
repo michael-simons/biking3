@@ -254,7 +254,7 @@ CREATE OR REPLACE VIEW v_mileage_by_bike_and_year AS (
 --
 CREATE OR REPLACE VIEW v_pace_percentiles_per_distance_and_year AS (
   SELECT value AS distance, year,
-         list_transform(percentiles, pace -> cast(floor(pace/60) AS int) || ':' || lpad(cast(round(pace%60, 0)::int AS VARCHAR), 2, '0')) AS percentiles
+         list_transform(percentiles, lambda pace: cast(floor(pace/60) AS int) || ':' || lpad(cast(round(pace%60, 0)::int AS VARCHAR), 2, '0')) AS percentiles
   FROM v$_pace_percentiles_per_distance_and_year
 );
 
