@@ -5,9 +5,12 @@
 -- The mileage in this view is the amount of km travelled in that month, not the total value for the given bike any more.
 --
 CREATE OR REPLACE VIEW v$_mileage_by_bike_and_month AS (
-  SELECT b.name                                                                         AS bike,
-         date_trunc('month', m.recorded_on)                                             AS month,
-         lead(m.amount) OVER (PARTITION BY m.bike_id ORDER BY m.recorded_on) - m.amount AS value
+  SELECT bike:  b.name,
+         month: date_trunc('month', m.recorded_on - INTERVAL 1 MONTH),
+         value: CAST(m.amount - coalesce(
+           lag(m.amount) OVER (PARTITION BY m.bike_id ORDER BY m.recorded_on),
+           if(month <> date_trunc('month', b.bought_on) , null, 0)
+         ) AS DECIMAL(9,2))
   FROM bikes b
     JOIN milages m ON (m.bike_id = b.id)
   QUALIFY value IS NOT NULL

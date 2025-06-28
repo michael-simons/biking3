@@ -152,7 +152,7 @@
                         {% endfor %}
                         {
                             type: 'line',
-                            name: 'Total (Including assorted trips)',
+                            name: 'Total (Including assorted trips and bikes)',
                             data: [{{ ytd_totals['value'].to_list()|join(', ') }}],
                             smooth: true,
                             color: '#7CB5EB',
