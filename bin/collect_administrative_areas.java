@@ -1,7 +1,7 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 24
 //DEPS info.picocli:picocli:4.7.6
-//DEPS org.duckdb:duckdb_jdbc:1.2.1
+//DEPS org.duckdb:duckdb_jdbc:1.3.1.0
 //RUNTIME_OPTIONS --enable-native-access=ALL-UNNAMED
 
 import java.io.FileInputStream;
