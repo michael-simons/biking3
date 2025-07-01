@@ -6,6 +6,9 @@
 # export GARMIN_JWT=jwt_token_from_your_cookie_store_for_garmin
 # export GARMIN_BACKEND_TOKEN=long_gibberish_token_from_one_of_the_requests
 #
+# In case you have very large activities, https://www.gpsbabel.org is needed
+# to convert fit to gpx, otherwise they just be downloaded from Garmin, too
+#
 
 set -euo pipefail
 export LC_ALL=en_US.UTF-8
@@ -57,6 +60,21 @@ else
       --ids="$ids" \
       "$TARGET_DIR"
   fi
+
+  # Sine mid june I came across files that timed out with http 408 on the API when asked for GPX, but downloaded just
+  # fine as fit. The web app said "to large to download as GPX, try fit…", so here we are…
+  IFS=, read -ra id_array <<< "$ids"
+  for id in "${id_array[@]}"; do
+    zip="$TARGET_DIR/$id".zip
+    gpx="$TARGET_DIR/$id".gpx
+    fit="$TARGET_DIR/$id"_ACTIVITY.fit
+    if test -f $zip -a ! -f $gpx;  then
+      echo "Using gpsbabel to convert fit to gpx..."
+      unzip "$zip" -d "$TARGET_DIR"
+      gpsbabel -i garmin_fit -f "$fit"  -o gpx -F "$gpx"
+      rm "$fit"
+    fi
+  done
 fi
 
 if compgen -G "$TARGET_DIR/*.gpx" > /dev/null;
