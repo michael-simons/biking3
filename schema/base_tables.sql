@@ -25,7 +25,7 @@ ALTER TABLE bikes ADD COLUMN IF NOT EXISTS hide BOOLEAN DEFAULT false;
 CREATE SEQUENCE IF NOT EXISTS milage_id;
 CREATE TABLE IF NOT EXISTS milages (
   id                  INTEGER PRIMARY KEY DEFAULT(nextval('milage_id')),
-  recorded_on         DATE CHECK (day(recorded_on) = 1)  NOT NULL,
+  recorded_on         DATE CHECK (day(recorded_on) = 1) NOT NULL,
   amount              DECIMAL(8, 2) NOT NULL,
   created_at          DATETIME NOT NULL DEFAULT(now()),
   bike_id             INTEGER NOT NULL,
@@ -315,15 +315,16 @@ ALTER TABLE administrative_areas ADD COLUMN IF NOT EXISTS coverage STRUCT(
 
 
 --
--- Fries and other really important nutrition
+-- Fries and other important point of interests
 --
-CREATE SEQUENCE IF NOT EXISTS refills_id;
-CREATE TABLE IF NOT EXISTS refills (
-    id BIGINT PRIMARY KEY DEFAULT(nextval('refills_id')),
+CREATE SEQUENCE IF NOT EXISTS poi_id;
+CREATE TABLE IF NOT EXISTS poi (
+    id BIGINT PRIMARY KEY DEFAULT(nextval('poi_id')),
     type VARCHAR(8) DEFAULT 'fries' NOT NULL,
     name VARCHAR(128) NOT NULL,
     visited_on DATE NOT NULL,
     link VARCHAR(128) NOT NULL,
+    link_type VARCHAR(8) DEFAULT 'absolute' CHECK (link_type IN ('absolute', 'relative')) NOT NULL,
     longitude DECIMAL(9, 6) NOT NULL,
     latitude DECIMAL(8, 6) NOT NULL
 );

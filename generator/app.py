@@ -210,9 +210,11 @@ def site(database: str):
         with db.cursor() as con:
             result = con.execute("FROM v_explorer_areas").fetchone()
             areas = [] if result is None else result[0]
+            pictures = con.execute("FROM poi WHERE type = 'picture'").df()
             summary = con.execute("FROM v_explorer_summary WHERE zoom = 14").df()
             return flask.render_template('explorer.html.jinja2', summary=summary, areas=json.loads(areas),
-                                         thunderforest_api_key=thunderforest_api_key, max_garmin=max_garmin)
+                                         thunderforest_api_key=thunderforest_api_key, max_garmin=max_garmin,
+                                         pictures=pictures)
 
     @app.route("/unexplored", methods=['POST'])
     def export_unexplored():

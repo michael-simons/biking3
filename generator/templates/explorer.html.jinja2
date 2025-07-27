@@ -12,7 +12,7 @@
                     If you cross the connected tile left, right, top and bottom of any tile too, that tile is counted as
                     a cluster-tile. The max square is based on the biggest square you can create with all the connected
                     tiles. The idea of tiles itself stems from <a href="https://en.wikipedia.org/wiki/Tiled_web_map">tiled
-                    web maps</a>. In Germany a tile at zoom level 14 has roughly an area of <strong>1.55km²</strong>.
+                    web maps</a>. In Germany a tile at zoom level 14 has roughly an area of <strong>2.40km²</strong>.
                 </p>
                 <p>
                     I cycled, ran, walked and swam <strong>{{ _summary['total_tiles']|fmt_int }}</strong> tiles in
@@ -72,6 +72,7 @@
                     </div>
                 </div>
             </form>
+            <p>Use the layer control inside the map to display or hide fries and pictures.</p>
         </div>
         <div class="col-lg-9 col-md-12 mt-lg-1 mt-3">
             <div id="map" style="width: 100%; height: 60vh;"></div>
@@ -100,7 +101,7 @@
                     {% endfor %}
                 </ul>
             {% endmacro %}
-            <div class="accordion" id="accordionExample">
+            <div class="accordion" id="regions">
                 {% for country in areas %}
                     <div class="accordion-item">
                         <h2 class="accordion-header">
@@ -111,7 +112,7 @@
                             </button>
                         </h2>
                         <div id="c-{{ country['id'] }}" class="accordion-collapse collapse"
-                             data-bs-parent="#accordionExample">
+                             data-bs-parent="#regions">
                             <div class="accordion-body small">
                                 <div class="overflow-scroll" style="max-height: 40vh">
                                     First activity on <strong>{{ country['visited_first_on'] }}</strong>, last activity
@@ -329,11 +330,28 @@
                 }
             }).addTo(map);
 
+            const picturesLayer = L.layerGroup([]);
+            const pictures = document.getElementById("pictures").getElementsByTagName("li");
+            for (let picture of pictures) {
+                var a = picture.getElementsByTagName("a").item(0);
+                const figure = `
+                    <figure class="figure" style="width: 480px; height: 360px;">
+                        <img src="${a.href}" class="figure-img img-fluid rounded" alt="${a.text}">
+                        <figcaption class="figure-caption">${a.text}</figcaption>
+                    </figure>
+                `
+
+                L.marker([picture.dataset.latitude, picture.dataset.longitude])
+                    .bindPopup(figure, {minWidth: 480, maxWidth: 480, autoPanPadding: L.point(20, 20)})
+                    .addTo(picturesLayer);
+            }
+
             L.control.layers(layers, {
                 'Tiles': tilesLayer,
                 'Max clusters': maxClustersLayer,
                 'Max squares': maxSquaresLayer,
-                'Fries': friesLayer
+                'Fries': friesLayer,
+                'Pictures': picturesLayer
             }).addTo(map);
             map.addControl(L.control.locate());
             map.addControl(new L.Control.Fullscreen());
@@ -395,4 +413,12 @@
             fetchAll();
         }
     </script>
+    <div id="pictures" style="display: none;">
+        <ul>
+            {% for picture in pictures.itertuples() %}
+                <li data-longitude="{{ picture['longitude'] }}" data-latitude="{{ picture['latitude'] }}"><a
+                        href="{{ url_for('static', filename=picture['link']) }}">{{ picture['name'] }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
 {% endblock %}

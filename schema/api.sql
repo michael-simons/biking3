@@ -677,8 +677,8 @@ CREATE OR REPLACE VIEW v_fries AS
 WITH features AS (
     SELECT type: 'Feature',
            geometry: ST_AsGeoJSON(ST_ReducePrecision(ST_Point(longitude, latitude), 0.0001)),
-           properties: struct_pack(*columns(* exclude (id, longitude, latitude, type)))
-    FROM refills
+           properties: struct_pack(*columns(* exclude (id, longitude, latitude, type, link_type)))
+    FROM poi
     WHERE type = 'fries'
 )
 SELECT CAST({
