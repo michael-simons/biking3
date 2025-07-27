@@ -198,7 +198,7 @@ def site(database: str):
                                  ['v_explorer_' + feature_type, zoom]).fetchone()
             return [] if result is None else result[0], {'content-type': 'application/json'}
 
-    @app.route("/fries.json")
+    @app.route("/explorer/fries.json")
     def fries():
         with db.cursor() as con:
             result = con.execute("SELECT feature_collection FROM v_fries").fetchone()
