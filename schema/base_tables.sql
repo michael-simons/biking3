@@ -312,3 +312,18 @@ ALTER TABLE administrative_areas ADD COLUMN IF NOT EXISTS coverage STRUCT(
     zoom UTINYINT,
     percentage DECIMAL(5, 2)
 )[];
+
+
+--
+-- Fries and other really important nutrition
+--
+CREATE SEQUENCE IF NOT EXISTS refills_id;
+CREATE TABLE IF NOT EXISTS refills (
+    id BIGINT PRIMARY KEY DEFAULT(nextval('refills_id')),
+    type VARCHAR(8) DEFAULT 'fries' NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    visited_on DATE NOT NULL,
+    link VARCHAR(128) NOT NULL,
+    longitude DECIMAL(9, 6) NOT NULL,
+    latitude DECIMAL(8, 6) NOT NULL
+);

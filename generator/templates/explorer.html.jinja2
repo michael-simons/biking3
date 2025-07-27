@@ -3,7 +3,7 @@
 {% block nav_explorer %}class="nav-link active" aria-current="page"{% endblock %}
 {% block content %}
     <h1 class="title">Explorer the Earth</h1>
-    <p class="lead">One tile at a time…</p>
+    <p class="lead">One tile at a time, including 🍟…</p>
     <div class="row mb-4">
         <div class="col-12">
             {% for _summary in summary.itertuples() %}
@@ -303,10 +303,37 @@
                     tilesLayer.resetStyle();
                 });
             }
+            const friesLayer = L.geoJSON(null, {
+                pointToLayer: function (feature, latlng) {
+                    return L.marker(latlng, {
+                        icon: L.icon({
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16],
+                            popupAnchor: [0, -16],
+                            iconUrl: '{{ url_for('static', filename='img/fries.png') }}'
+                        })
+                    });
+                },
+                onEachFeature: function (feature, layer) {
+                    let lines = []
+                    lines.push('<table>')
+                    lines.push(`<thead><tr><th colspan="2">${feature.properties['name']} <a href="${feature.properties['link']}" title="Open toot in Mastodon" target="_blank">➚</></th><tr></thead>`)
+                    for (const property in feature.properties) {
+                        if (['name', 'link'].includes(property)) {
+                            continue;
+                        }
+                        lines.push(`<tr><th scope="row">${property}</th><td>${feature.properties[property]}</td></tr>`)
+                    }
+                    lines.push('</table>')
+                    layer.bindPopup(lines.join(''))
+                }
+            }).addTo(map);
+
             L.control.layers(layers, {
                 'Tiles': tilesLayer,
                 'Max clusters': maxClustersLayer,
-                'Max squares': maxSquaresLayer
+                'Max squares': maxSquaresLayer,
+                'Fries': friesLayer
             }).addTo(map);
             map.addControl(L.control.locate());
             map.addControl(new L.Control.Fullscreen());
@@ -343,8 +370,11 @@
                 const tiles = fetch(urls[tileSize].tiles).then(response => response.json()).then(json => {
                     return [tilesLayer, json]
                 });
+                const fries = fetch('{{ url_for('fries') }}').then(response => response.json()).then(json => {
+                    return [friesLayer, json]
+                });
 
-                Promise.all([tiles, clusters, squares]).then(responses => {
+                Promise.all([tiles, clusters, squares, fries]).then(responses => {
                     for (let data of responses) {
                         data[0].addData(data[1])
                     }

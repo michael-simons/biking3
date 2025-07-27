@@ -668,3 +668,21 @@ SELECT coalesce(list(struct_pack(*columns(c_tree.* EXCLUDE (country_code, parent
 FROM c_tree
 WHERE level=0;
 COMMENT ON VIEW v_explorer_areas IS 'Quick overview over the visited areas.';
+
+
+---
+--- The important stuff when you are on the road
+---
+CREATE OR REPLACE VIEW v_fries AS
+WITH features AS (
+    SELECT type: 'Feature',
+           geometry: ST_AsGeoJSON(ST_ReducePrecision(ST_Point(longitude, latitude), 0.0001)),
+           properties: struct_pack(*columns(* exclude (id, longitude, latitude, type)))
+    FROM refills
+    WHERE type = 'fries'
+)
+SELECT CAST({
+        type: 'FeatureCollection',
+        features: list(r)
+       } AS JSON) AS feature_collection
+FROM features r;

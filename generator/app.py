@@ -198,6 +198,12 @@ def site(database: str):
                                  ['v_explorer_' + feature_type, zoom]).fetchone()
             return [] if result is None else result[0], {'content-type': 'application/json'}
 
+    @app.route("/fries.json")
+    def fries():
+        with db.cursor() as con:
+            result = con.execute("SELECT feature_collection FROM v_fries").fetchone()
+            return [] if result is None else result[0], {'content-type': 'application/json'}
+
     @app.route("/explorer/", )
     def explorer():
         thunderforest_api_key = flask.current_app.jinja_env.globals.get('thunderforest_api_key')
